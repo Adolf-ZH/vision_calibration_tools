@@ -1,4 +1,4 @@
-## 相机 + IMU 联合标定使用文档（basalt）
+# 相机 + IMU 联合标定使用文档（basalt）
 
 > 前置：已完成**单相机内参标定**（生成 `calibration.json`）。本流程基于已部署的
 > `basalt_calibrate_imu`（二进制已随 basalt 安装于 `~/.local/bin`）。
@@ -8,7 +8,7 @@
 
 ---
 
-### 1. 原理与目标
+## 1. 原理与目标
 
 相机 - IMU 联合标定是为了求取：
 
@@ -24,7 +24,7 @@ basalt 在标定时，用 AprilGrid 标定板的视觉观测（相机）+ 相互
 
 ---
 
-### 2. 环境与依赖
+## 2. 环境与依赖
 
 ```bash
 source ~/.basalt/env          # 每个新终端都要执行，加载 basalt 环境
@@ -39,7 +39,7 @@ pip install rosbags pyserial
 
 ---
 
-### 3. 数据采集
+## 3. 数据采集
 
 `basalt_calibrate_imu` 需要输入一个**同时包含图像和 IMU 数据**的 rosbag：
 
@@ -50,7 +50,7 @@ pip install rosbags pyserial
 > basalt 的 bag 读取逻辑与单相机标定一致：图像话题自动识别。
 > 但 IMU 联合标定**必须有 IMU 话题**，否则 `loadDataset` 会因无 IMU 数据而失败。
 
-#### 3.1 采集要求
+### 3.1 采集要求
 
 - 相机 + IMU 刚性固定在同一载体上
 - 标定板（AprilGrid）完整、清晰、占画面足够大
@@ -59,31 +59,27 @@ pip install rosbags pyserial
 - 相机帧率尽量稳定（如 20~30 Hz），IMU 采样率较高（8 位步态参考 100 Hz 以上）效果更好
 - **图像分辨率必须与运行时一致**（见 §3.3）。脚本默认已按运行时尺寸写入，不用手动处理
 
-##### 运动怎么做
-```
-标定板**固定不动**，人抱着车（相机+IMU 刚性固定）在板前做以下动作，**全程保持板子
-在画面内**：
+#### 运动怎么做
+
+标定板**固定不动**，人抱着车（相机+IMU 刚性固定）在板前做以下动作，**全程保持板子在画面内**：
 
 1. **俯仰**：枪口/相机上下快速点头，pitch ±20°~30°，来回 20+ 次
 2. **偏航**：车头左右快速甩动，yaw ±30°，来回 20+ 次
 3. **横滚**：把车体左右倾斜，roll ±20°，来回 10+ 次
 4. **平移**：推着车前后、左右移动（1m 范围），配合上面的旋转一起做
 5. **大幅混合**：把上面 4 个动作连续组合着做，像"端着车绕圈 + 画 8 字"
-```
-```
-时间分配：60~120 秒里大部分时间保持旋转运动，**最后 5~10 秒完全静止不动**（这能显著
-改善零偏估计）。
-```
-```
+
+时间分配：60~120 秒里大部分时间保持旋转运动，**最后 5~10 秒完全静止不动**（这能显著改善零偏估计）。
+
 **错误示范（会标定失败）**：
+
 - ❌ 云台"锁定"板子、只推着车平移——没有旋转激励，`initCamImuTransform` 会崩溃
 - ❌ 板子填满整个画面 / 画面模糊——角点检测不到
 - ❌ 只有水平方向转，没有俯仰和横滚
-```
-```
+
 判断标准：采集中用 `--display` 看实时预览，**绿色 tag 框数量 ≥ 9 且清晰可见**才合格。
-```
-#### 3.2 打包 bag（现成脚本）
+
+### 3.2 打包 bag（现成脚本）
 
 已提供可直接运行的采集脚本 `capture_cam_imu.py`，同时驱动一台相机（海康 / 迈德威视）
 + 大疆 C 板 IMU，用**同一单调时钟**（`time.monotonic_ns()`）给两者打时间戳，
@@ -148,7 +144,7 @@ python3 capture_cam_imu.py --camera mindvision \
 > `time.monotonic_ns()`（脚本内置），同一时钟基准，basalt 才能正确估计
 > 相机-IMU 时间偏移。
 
-#### 3.3 分辨率必须对齐运行时（重要）
+### 3.3 分辨率必须对齐运行时（重要）
 
 自瞄运行时 [image_utils.h](../../src/hw_io/camera/image_utils.h) 的
 `resizeFrameForOutput` 会先按 `mindvision.yaml` 的 `preprocess` 处理原图，
@@ -183,7 +179,7 @@ python3 capture_cam_imu.py --camera mindvision \
 > `1280x960`。抽帧只挑帧、不改尺寸，所以不影响本步的内参一致性。详见
 > 《迈德威视海康相机标定使用文档》§4。
 
-#### 3.4 IMU 时间戳为什么要重建
+### 3.4 IMU 时间戳为什么要重建
 
 串口 IMU 数据是**成批到达**的：主线程调用 `cam.grab()` 取图会被阻塞几十毫秒
 （实测约 116 ms），这段时间串口缓冲区会攒下约 23 帧 IMU。如果按"读取时刻"
@@ -202,9 +198,9 @@ python3 capture_cam_imu.py --camera mindvision \
 
 ---
 
-### 4. 运行 `basalt_calibrate_imu`
+## 4. 运行 `basalt_calibrate_imu`
 
-#### 4.1 命令
+### 4.1 命令
 
 **必须**指向和单相机标定**同一个** `--result-path`，这样它会读取该目录下的
 `calibration.json`（内含相机内参），并与 IMU 联合优化：
@@ -250,7 +246,7 @@ basalt_calibrate_imu \
 > - 迈德威视相机 → 都用 `~/calib_results/mindvision/` 和 `--aprilgrid .../mindvision_aprilgrid.json`
 > 两套参数不要混用（尤其 `--result-path`）。basalt 会读取该 `--result-path` 目录下的 `calibration.json`（相机内参），再与 IMU 联合优化。
 
-#### 4.2 无 GUI 全自动运行
+### 4.2 无 GUI 全自动运行
 
 确认相机内参已在 result-path 存在后，可加 `--no-gui` 自动跑完整流程：
 
@@ -271,7 +267,7 @@ basalt_calibrate_imu \
 `loadDataset → detectCorners → initCamPoses → initCamImuTransform → initOptimization`
 → 多轮 `optimizeWithParam(true)` 收敛 →（开启时间偏移/IMU scale 再优化）→ `saveCalib`
 
-#### 4.3 GUI 手动模式（去掉 `--no-gui`，有窗口、有标定结果绘制）
+### 4.3 GUI 手动模式（去掉 `--no-gui`，有窗口、有标定结果绘制）
 
 想**像单相机标定一样边看边标**，就不加 `--no-gui` 运行：
 
@@ -314,7 +310,7 @@ basalt_calibrate_imu \
 
 ---
 
-### 5. 结果
+## 5. 结果
 
 在 `--result-path` 目录会更新/生成：
 
@@ -339,7 +335,7 @@ cat /home/adolf/calib_results/hikvision/calibration.json
 - 若单位接近 / 合理（非全 0 / 非异常值）且 GUI 中重投影误差小，则标定有效
 - `cam_time_offset_ns` 非 0 说明估计出了相机-IMU 时间偏移
 
-#### 5.1 把内参写进自瞄配置（可直接使用）
+### 5.1 把内参写进自瞄配置（可直接使用）
 
 bag 里的图像已经是运行时尺寸（§3.3），所以 `intrinsics` 里的数值**可以直接抄**，
 不需要任何换算。
@@ -416,7 +412,7 @@ intrinsics:
 
 ---
 
-### 6. 常见问题
+## 6. 常见问题
 
 | 现象 | 原因 / 处理 |
 |------|-------------|
@@ -433,7 +429,7 @@ intrinsics:
 
 ---
 
-### 7. 完整流程速查
+## 7. 完整流程速查
 
 > 前置：先按《迈德威视海康相机标定使用文档》完成单相机标定（生成 `calibration.json`）。
 > 单相机标定为**两段式**：录制 `*_raw.bag`（按 R 开始/停止）→ `extract_calib_frames.py` 离线抽帧
@@ -495,7 +491,7 @@ cat /home/adolf/calib_results/mindvision/calibration.json
 
 ---
 
-### 8. 同步采集脚本工作原理
+## 8. 同步采集脚本工作原理
 
 你已经有了现成脚本 `capture_cam_imu.py`（见 §3.2），本节说明它的工作逻辑，
 便于你根据主控协议调整：
