@@ -1,0 +1,28 @@
+# 构建产物
+build/
+*.o
+*.a
+*.so
+!libapriltag2.so
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# 标定数据与临时文件
+*.bag
+*.cereal
+calibration.json
+*.png
+!doc/**/*.png
+
+# 编辑器
+.vscode/*
+!.vscode/settings.json
+.idea/
+*.swp
+
+# 系统
+.DS_Store
+Thumbs.db
