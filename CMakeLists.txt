@@ -22,9 +22,9 @@ if(EXISTS "${APRILTAG2_INCLUDE_DIR}/apriltags/TagDetector.h")
     target_include_directories(apriltag2 PRIVATE ${APRILTAG2_INCLUDE_DIR} ${OpenCV_INCLUDE_DIRS})
     target_link_libraries(apriltag2 PRIVATE ${OpenCV_LIBS})
     set_target_properties(apriltag2 PROPERTIES OUTPUT_NAME apriltag2)
-    message(STATUS "apriltag2: will build libapriltag2.so from ${APRILTAG2_INCLUDE_DIR}")
+    message(STATUS "apriltag2: 将从 ${APRILTAG2_INCLUDE_DIR} 编译 libapriltag2.so")
 else()
-    message(WARNING "apriltag2: ethz_apriltag2 headers not found at ${APRILTAG2_INCLUDE_DIR}. "
-                    "Set -DBASALT_DIR=/path/to/basalt to build libapriltag2.so. "
-                    "The prebuilt libapriltag2.so in the repo root can be used as-is.")
+    message(WARNING "apriltag2: 未找到 ethz_apriltag2 头文件 (${APRILTAG2_INCLUDE_DIR})。"
+                    "请用 -DBASALT_DIR=/path/to/basalt 指定 basalt 源码路径以编译 libapriltag2.so；"
+                    "也可直接使用仓库根目录下预编译的 libapriltag2.so。")
 endif()
