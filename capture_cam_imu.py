@@ -302,7 +302,8 @@ class ImuReader(threading.Thread):
     basalt 的 IMU 因子随之完全失效, 外参平移会发散成天文数字。
 
     这里把读串口放进独立线程(轮询间隔 ~0.5ms), 每次只拿到 1~2 个样本,
-    再在批内按 1/rate 回填时间戳, 保证样本间隔正确、且末样本对齐读取时刻。
+    再在批内按 1/rate 回填时间戳, 并用全局 _next_ts 保证跨批次单调递增,
+    避免相邻批次时间戳重叠导致间隔不均(实测 9.8% 间隔 <1ms)。
     """
 
     def __init__(self, ser, imu_fmt, rate_hz, out_queue):
@@ -316,6 +317,7 @@ class ImuReader(threading.Thread):
         self._buf_cb = b""
         self._buf = ""
         self.count = 0
+        self._next_ts = None  # 下一个样本应分配的时间戳, 保证全局单调递增
 
     def stop(self):
         self._stop_event.set()
@@ -358,10 +360,15 @@ class ImuReader(threading.Thread):
                 continue
             now = mono_ts()
             n = len(samples)
-            # 末样本对齐读取时刻, 前面的按采样周期往前回填
+            # 末样本对齐读取时刻 now, 批次内按 period 均匀回填
+            first_ts = now - (n - 1) * self._period_ns
+            # 跨批次保证单调递增: 不早于上一批分配的下一个时间戳
+            if self._next_ts is not None:
+                first_ts = max(first_ts, self._next_ts)
             for i, sample in enumerate(samples):
-                ts = now - (n - 1 - i) * self._period_ns
+                ts = first_ts + i * self._period_ns
                 self._queue.put((ts, sample))
+            self._next_ts = first_ts + n * self._period_ns
             self.count += n
 
 
