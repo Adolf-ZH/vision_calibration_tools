@@ -1,4 +1,4 @@
-# 相机 + IMU 联合标定使用文档（basalt）
+## 相机 + IMU 联合标定使用文档（basalt）
 
 > 前置：已完成**单相机内参标定**（生成 `calibration.json`）。本流程基于已部署的
 > `basalt_calibrate_imu`（二进制已随 basalt 安装于 `~/.local/bin`）。
@@ -8,7 +8,7 @@
 
 ---
 
-## 1. 原理与目标
+### 1. 原理与目标
 
 相机 - IMU 联合标定是为了求取：
 
@@ -24,7 +24,7 @@ basalt 在标定时，用 AprilGrid 标定板的视觉观测（相机）+ 相互
 
 ---
 
-## 2. 环境与依赖
+### 2. 环境与依赖
 
 ```bash
 source ~/.basalt/env          # 每个新终端都要执行，加载 basalt 环境
@@ -39,7 +39,7 @@ pip install rosbags pyserial
 
 ---
 
-## 3. 数据采集
+### 3. 数据采集
 
 `basalt_calibrate_imu` 需要输入一个**同时包含图像和 IMU 数据**的 rosbag：
 
@@ -50,36 +50,61 @@ pip install rosbags pyserial
 > basalt 的 bag 读取逻辑与单相机标定一致：图像话题自动识别。
 > 但 IMU 联合标定**必须有 IMU 话题**，否则 `loadDataset` 会因无 IMU 数据而失败。
 
-### 3.1 采集要求
+#### 3.1 采集要求
 
 - 相机 + IMU 刚性固定在同一载体上
 - 标定板（AprilGrid）完整、清晰、占画面足够大
 - **充分激励六自由度运动**：不能只原地平移，要多做旋转 + 平移组合（摆动、绕各轴转动），这是 IMU 标定收敛的关键
-- 采集时长建议 **60 ~ 120 秒**
-- 相机帧率尽量稳定（如 20~30 Hz），IMU 采样率较高（8 位步态参考 100 Hz 以上）效果更好
+- 采集时长建议 **30 ~ 60 秒**（太长会让 bag 过大、标定极慢）
+- 图像帧率 **3 ~ 5 Hz** 即可（帧数太多会导致 basalt 优化耗时数小时，100~150 帧足够）
+- IMU 采样率较高（C 板 200 Hz）效果更好
 - **图像分辨率必须与运行时一致**（见 §3.3）。脚本默认已按运行时尺寸写入，不用手动处理
+- **必须使用手动曝光**（传 `--exposure`），禁止自动曝光——自动曝光会导致亮度变化、角点检测不稳定、时间戳不准（见 §3.5）
 
-#### 运动怎么做
+##### 运动怎么做
 
-标定板**固定不动**，人抱着车（相机+IMU 刚性固定）在板前做以下动作，**全程保持板子在画面内**：
+标定板**固定不动**，人抱着车（相机+IMU 刚性固定）在板前做以下动作，**尽量让板子一直在画面内**（短暂消失 <1 秒没问题，长时间 >3 秒不建议）：
 
-1. **俯仰**：枪口/相机上下快速点头，pitch ±20°~30°，来回 20+ 次
-2. **偏航**：车头左右快速甩动，yaw ±30°，来回 20+ 次
-3. **横滚**：把车体左右倾斜，roll ±20°，来回 10+ 次
+1. **俯仰**：枪口/相机上下快速点头，pitch ±30°，来回 20+ 次
+2. **偏航**：车头左右快速甩动，yaw ±45°，来回 20+ 次
+3. **横滚**：把车体左右倾斜，roll ±30°，来回 10+ 次
 4. **平移**：推着车前后、左右移动（1m 范围），配合上面的旋转一起做
 5. **大幅混合**：把上面 4 个动作连续组合着做，像"端着车绕圈 + 画 8 字"
 
-时间分配：60~120 秒里大部分时间保持旋转运动，**最后 5~10 秒完全静止不动**（这能显著改善零偏估计）。
+> **角速度要够快**：旋转速度应达到 **1~2 rad/s（60~120 deg/s）**。实测若角速度均值
+> 仅 0.07 rad/s、最大 <1 rad/s，说明运动太缓慢，IMU 旋转激励不足，外参会退化。
+> 用 `--display` 看不到 IMU 曲线，可在采集后用以下命令快速检查激励是否充分：
+> ```bash
+> python3 -c "
+> from rosbags.rosbag1 import Reader
+> from rosbags.typesys import Stores, get_typestore
+> import numpy as np
+> st = get_typestore(Stores.ROS1_NOETIC)
+> r = Reader('你的bag.bag'); r.open()
+> g = []
+> for c, t, d in r.messages():
+>     if c.topic == '/imu/data_raw':
+>         m = st.deserialize_ros1(d, c.msgtype)
+>         g.append([m.angular_velocity.x, m.angular_velocity.y, m.angular_velocity.z])
+> r.close()
+> g = np.array(g)
+> print(f'角速度均值: {np.mean(np.linalg.norm(g,axis=1)):.3f} rad/s')
+> print(f'角速度最大: {np.max(np.linalg.norm(g,axis=1)):.3f} rad/s')
+> print('合格: 最大 > 1.0 rad/s')
+> "
+> ```
+
+时间分配：30~60 秒里大部分时间保持旋转运动，**最后 5 秒完全静止不动**（这能显著改善零偏估计）。
 
 **错误示范（会标定失败）**：
-
 - ❌ 云台"锁定"板子、只推着车平移——没有旋转激励，`initCamImuTransform` 会崩溃
 - ❌ 板子填满整个画面 / 画面模糊——角点检测不到
 - ❌ 只有水平方向转，没有俯仰和横滚
+- ❌ 运动太慢（角速度 < 0.5 rad/s）——IMU 激励不足，外参退化
+- ❌ 用自动曝光（不传 `--exposure`）——亮度波动导致角点检测不稳定
 
 判断标准：采集中用 `--display` 看实时预览，**绿色 tag 框数量 ≥ 9 且清晰可见**才合格。
-
-### 3.2 打包 bag（现成脚本）
+#### 3.2 打包 bag（现成脚本）
 
 已提供可直接运行的采集脚本 `capture_cam_imu.py`，同时驱动一台相机（海康 / 迈德威视）
 + 大疆 C 板 IMU，用**同一单调时钟**（`time.monotonic_ns()`）给两者打时间戳，
@@ -106,15 +131,22 @@ python3 capture_cam_imu.py --camera hikvision \
     --out ~/calib_data/imu_calib.bag \
     --port /dev/ttyACM0 --baud 115200 \
     --imu-fmt cboard \
-    --exposure 30 --duration 90
+    --exposure 20 --duration 40 --fps 3
 
 # 迈德威视：
 python3 capture_cam_imu.py --camera mindvision \
     --out ~/calib_data/imu_calib.bag \
     --port /dev/ttyACM0 --baud 115200 \
     --imu-fmt cboard \
-    --exposure 30 --duration 90
+    --exposure 20 --duration 40 --fps 3
 ```
+
+> **参数要点**：
+> - `--exposure` **必须传**（手动曝光），值根据光照调整（室内 10~30 ms）。不传则海康相机会
+>   用自动曝光，迈德威视相机会关闭自动曝光但用上次保存的默认值，都不适合标定。
+> - `--fps 3` + `--duration 40` → 约 120 帧图像。帧数太多（如 20fps × 90s = 1800 帧）
+>   会让 basalt 联合优化耗时 **5 小时以上**且容易不收敛。
+> - `--imu-rate 200` 是默认值，C 板直接用即可。
 
 > C 板没接 / 设备名不是 ttyACM0 时：先 `ls /dev/ttyACM* /dev/ttyUSB*` 确认，
 > 再接上后 `python3 -m serial.tools.list_ports -v` 看描述是否为 "STM32 Virtual ComPort"。
@@ -130,7 +162,7 @@ python3 capture_cam_imu.py --camera mindvision \
 >     --out ~/calib_data/imu_e2e_v2.bag \
 >     --port /dev/ttyACM0 --imu-fmt cboard \
 >     --display --grid 60 --cols 10 --rows 6 \
->     --exposure 30 --duration 90 --fps 20
+>     --exposure 20 --duration 40 --fps 3
 > ```
 > 若预览中绿色检测数为 0，说明失焦或板子图案无法解码，先调整后再正式采集。
 
@@ -144,7 +176,7 @@ python3 capture_cam_imu.py --camera mindvision \
 > `time.monotonic_ns()`（脚本内置），同一时钟基准，basalt 才能正确估计
 > 相机-IMU 时间偏移。
 
-### 3.3 分辨率必须对齐运行时（重要）
+#### 3.3 分辨率必须对齐运行时（重要）
 
 自瞄运行时 [image_utils.h](../../src/hw_io/camera/image_utils.h) 的
 `resizeFrameForOutput` 会先按 `mindvision.yaml` 的 `preprocess` 处理原图，
@@ -179,7 +211,7 @@ python3 capture_cam_imu.py --camera mindvision \
 > `1280x960`。抽帧只挑帧、不改尺寸，所以不影响本步的内参一致性。详见
 > 《迈德威视海康相机标定使用文档》§4。
 
-### 3.4 IMU 时间戳为什么要重建
+#### 3.4 IMU 时间戳为什么要重建
 
 串口 IMU 数据是**成批到达**的：主线程调用 `cam.grab()` 取图会被阻塞几十毫秒
 （实测约 116 ms），这段时间串口缓冲区会攒下约 23 帧 IMU。如果按"读取时刻"
@@ -189,18 +221,61 @@ python3 capture_cam_imu.py --camera mindvision \
 后果：basalt 会把 IMU 采样率估成 287 Hz（真实 200 Hz），IMU 因子完全失效，
 `T_imu_cam` 的平移会发散成天文数字（实测 `pz = -234 m`，而相机到 IMU 只有几厘米）。
 
-脚本现在的做法：**读串口放在独立线程**（轮询间隔 ~0.5 ms，每次只拿到 1~2 个样本），
-再在批内按 `--imu-rate` 回填时间戳（末样本对齐读取时刻，前面的按 1/rate 往前推），
-保证样本间隔正确。
+脚本现在的做法（两层修复）：
+
+1. **读串口放在独立线程**（轮询间隔 ~0.5 ms，每次只拿到 1~2 个样本），
+   再在批内按 `--imu-rate` 回填时间戳（末样本对齐读取时刻，前面的按 1/rate 往前推），
+   保证样本间隔正确。
+
+2. **跨批次单调递增**（`_next_ts` 机制）：如果相邻两批读取间隔小于 `1/rate`，
+   简单的"末样本对齐 now"会导致批次间时间戳重叠（实测 9.8% 的样本间隔 <1 ms，
+   应该是 5 ms）。脚本维护一个全局 `_next_ts`，每批的第一个样本时间戳取
+   `max(now - (n-1)*period, _next_ts)`，保证全局单调递增、间隔严格均匀。
 
 > 大疆 C 板实测 IMU 为 **200 Hz**，默认值 `--imu-rate 200` 直接可用。
 > 若你的主控 IMU 是别的速率，按实际值传（例如 `--imu-rate 1000`）。
 
+> **采集后快速验证时间戳是否正确**：
+> ```bash
+> python3 -c "
+> from rosbags.rosbag1 import Reader
+> from rosbags.typesys import Stores, get_typestore
+> import numpy as np
+> st = get_typestore(Stores.ROS1_NOETIC)
+> r = Reader('你的bag.bag'); r.open()
+> ts = [t for c,t,d in r.messages() if c.topic=='/imu/data_raw']
+> r.close()
+> ts.sort()
+> diffs = np.diff(ts) / 1e6  # ms
+> print(f'IMU 平均速率: {len(ts)/(ts[-1]-ts[0])*1e9:.1f} Hz (应≈200)')
+> print(f'间隔中位数: {np.median(diffs):.3f} ms (应≈5.0)')
+> print(f'间隔<1ms占比: {np.mean(diffs<1)*100:.1f}% (应≈0%)')
+> "
+> ```
+> 合格标准：平均速率 ≈200 Hz，间隔中位数 ≈5.0 ms，<1ms 占比 ≈0%。
+
+#### 3.5 曝光模式（必须手动曝光）
+
+标定时**必须使用手动曝光**（传 `--exposure`），禁止自动曝光，原因：
+
+1. **角点检测不稳定**：自动曝光会随画面亮度变化调整曝光时间，导致 aprilgrid 检测成功率波动
+2. **时间戳不准**：曝光时长变化，"曝光中心时刻"不固定，`cam_time_offset_ns` 估计偏差大
+3. **运动模糊不一致**：快速旋转时自动曝光可能变长，模糊加剧
+
+| 相机 | 不传 `--exposure` 的行为 |
+|------|--------------------------|
+| 迈德威视 | 总是关闭自动曝光，使用相机上次保存的手动曝光值 |
+| 海康 | **保持自动曝光**（不适合标定） |
+
+所以**两台相机采集时都必须传 `--exposure`**。曝光时间选择：
+- 室内正常光照：**10–30 ms**
+- 用 `--display` 预览，调到画面亮度适中、tag 边界锐利、无明显运动模糊
+
 ---
 
-## 4. 运行 `basalt_calibrate_imu`
+### 4. 运行 `basalt_calibrate_imu`
 
-### 4.1 命令
+#### 4.1 命令
 
 **必须**指向和单相机标定**同一个** `--result-path`，这样它会读取该目录下的
 `calibration.json`（内含相机内参），并与 IMU 联合优化：
@@ -246,7 +321,7 @@ basalt_calibrate_imu \
 > - 迈德威视相机 → 都用 `~/calib_results/mindvision/` 和 `--aprilgrid .../mindvision_aprilgrid.json`
 > 两套参数不要混用（尤其 `--result-path`）。basalt 会读取该 `--result-path` 目录下的 `calibration.json`（相机内参），再与 IMU 联合优化。
 
-### 4.2 无 GUI 全自动运行
+#### 4.2 无 GUI 全自动运行
 
 确认相机内参已在 result-path 存在后，可加 `--no-gui` 自动跑完整流程：
 
@@ -267,7 +342,7 @@ basalt_calibrate_imu \
 `loadDataset → detectCorners → initCamPoses → initCamImuTransform → initOptimization`
 → 多轮 `optimizeWithParam(true)` 收敛 →（开启时间偏移/IMU scale 再优化）→ `saveCalib`
 
-### 4.3 GUI 手动模式（去掉 `--no-gui`，有窗口、有标定结果绘制）
+#### 4.3 GUI 手动模式（去掉 `--no-gui`，有窗口、有标定结果绘制）
 
 想**像单相机标定一样边看边标**，就不加 `--no-gui` 运行：
 
@@ -310,7 +385,7 @@ basalt_calibrate_imu \
 
 ---
 
-## 5. 结果
+### 5. 结果
 
 在 `--result-path` 目录会更新/生成：
 
@@ -332,10 +407,23 @@ cat /home/adolf/calib_results/hikvision/calibration.json
     "qx": 0.0, "qy": 0.0, "qz": 0.0, "qw": 1.0
 }]
 ```
-- 若单位接近 / 合理（非全 0 / 非异常值）且 GUI 中重投影误差小，则标定有效
+
+**判断标定是否成功**（同时满足以下条件）：
+
+| 指标 | 合格标准 | 不合格的含义 |
+|------|----------|-------------|
+| `T_imu_cam` 平移模 | **< 0.3 m**（相机到 IMU 通常几厘米到十几厘米） | >1 m 说明 IMU 因子失效，时间戳有问题 |
+| `imu_update_rate` | **≈ 实际 IMU 采样率**（C 板 ≈200 Hz，偏差 <10%） | 偏离大说明时间戳被压扁 |
+| `cam_time_offset_ns` | 非 0（通常几 ms），或 0 也可能 | — |
+| `intrinsics` | 与单相机标定结果一致 | 不一致说明尺寸没对齐 |
+| 重投影误差 | < 1 px | 大说明角点检测或外参有问题 |
+
+- 若 `T_imu_cam` 平移是天文数字（如 `pz = -8 m`）→ IMU 时间戳问题，见 §3.4 重新采集
+- 若 `imu_update_rate` 偏离 200 Hz 超过 10% → 同上
+- 若单位接近 / 合理且 GUI 中重投影误差小，则标定有效
 - `cam_time_offset_ns` 非 0 说明估计出了相机-IMU 时间偏移
 
-### 5.1 把内参写进自瞄配置（可直接使用）
+#### 5.1 把内参写进自瞄配置（可直接使用）
 
 bag 里的图像已经是运行时尺寸（§3.3），所以 `intrinsics` 里的数值**可以直接抄**，
 不需要任何换算。
@@ -412,7 +500,7 @@ intrinsics:
 
 ---
 
-## 6. 常见问题
+### 6. 常见问题
 
 | 现象 | 原因 / 处理 |
 |------|-------------|
@@ -429,7 +517,7 @@ intrinsics:
 
 ---
 
-## 7. 完整流程速查
+### 7. 完整流程速查
 
 > 前置：先按《迈德威视海康相机标定使用文档》完成单相机标定（生成 `calibration.json`）。
 > 单相机标定为**两段式**：录制 `*_raw.bag`（按 R 开始/停止）→ `extract_calib_frames.py` 离线抽帧
@@ -452,10 +540,11 @@ python3 capture_cam_imu.py --camera mindvision \
     --out ~/calib_data/imu_calib.bag \
     --port /dev/ttyACM0 --imu-fmt cboard \
     --display --grid 60 --cols 10 --rows 6 \
-    --exposure 30 --duration 90 --fps 20
+    --exposure 20 --duration 40 --fps 3
 
 #   采集中：预览窗口绿色框 ≥ 9 个才算合格；
-#   按 §3.1 动作做 60~120s 旋转运动，最后 5~10s 静止；q/Esc 结束。
+#   按 §3.1 动作做 30~60s 旋转运动（角速度 1~2 rad/s），最后 5s 静止；q/Esc 结束。
+#   采集后用 §3.1 的脚本检查角速度激励、§3.4 的脚本检查时间戳是否正常。
 
 # 2. 相机-IMU 联合标定（result-path 与单相机标定相同）
 basalt_calibrate_imu \
@@ -491,7 +580,7 @@ cat /home/adolf/calib_results/mindvision/calibration.json
 
 ---
 
-## 8. 同步采集脚本工作原理
+### 8. 同步采集脚本工作原理
 
 你已经有了现成脚本 `capture_cam_imu.py`（见 §3.2），本节说明它的工作逻辑，
 便于你根据主控协议调整：
@@ -509,10 +598,12 @@ IMU 线程: 高频轮询串口 (间隔 ~0.5ms) -> 解析样本
   读串口，整批样本会共用同一个时间戳，IMU 时间轴被压扁（详见 §3.4）
 - **批内回填时间戳**：串口一次读出 N 个样本时，末样本对齐读取时刻，前面的按
   `1/--imu-rate` 往前推，保证样本间隔正确
+- **跨批次单调递增**：维护全局 `_next_ts`，避免相邻批次时间戳重叠（详见 §3.4）
 - 相机时间戳与 IMU 时间戳使用**同一时钟源**（`time.monotonic_ns()`，脚本内置）
 - 图像写入前会做与运行时相同的缩放（§3.3），保证内参可直接使用
-- 采集时让载具做**大幅旋转 + 平移**，覆盖六自由度激励
-- 相机 5~30 Hz（`--fps` 控制写入帧率），IMU 尽量 ≥100 Hz
-- 时长 60~120 秒，标定板始终在画面内且清晰
+- 采集时让载具做**大幅旋转 + 平移**，覆盖六自由度激励，角速度 1~2 rad/s
+- 相机 3~5 Hz（`--fps` 控制写入帧率），IMU 尽量 ≥100 Hz
+- 时长 30~60 秒，标定板尽量在画面内（短暂消失 <1s 可接受）
+- 必须传 `--exposure` 手动曝光，禁止自动曝光（§3.5）
 - 若要改 IMU 串口协议，改 `parse_imu_cboard()`（`cboard`）或
   `parse_imu_line()`（`text` / `nmea`）即可
