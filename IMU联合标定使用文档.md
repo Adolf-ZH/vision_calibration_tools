@@ -497,6 +497,10 @@ intrinsics:
 >
 > 即横向 10 个、纵向 6 个 tag（共 60 个），单个 tag 边长 13.7 mm，间隙约 4.4 mm。
 > 采集时对应 `--cols 10 --rows 6 --grid 60`。详见《迈德威视海康相机标定使用文档》§3.0。
+>
+> **换板子时不要手改 JSON**（JSON 不支持注释，`tagSize`/`tagSpacing` 容易填反）：
+> 改 `相机标定/set_aprilgrid.py` 顶部【板子参数】的 4 个数，运行
+> `python3 set_aprilgrid.py`，会自动写出 mindvision / hikrobot 两份 JSON。
 
 ---
 

@@ -16,6 +16,7 @@ vision_calibration_tools/
 ├── .vscode/settings.json
 │
 ├── 采集脚本（Python）
+├── set_aprilgrid.py                   # 标定板规格 → aprilgrid JSON（换板子只改这里）
 ├── calib_common.py                    # 公共库：AprilTag 检测叠加、消息打包、尺寸对齐
 ├── capture_mindvision_sdk.py          # 迈德威视（SDK）录制 → bag
 ├── capture_mindvision.py              # 迈德威视（UVC）录制 → bag
